@@ -1,7 +1,6 @@
 # Hi ![](https://user-images.githubusercontent.com/18350557/176309783-0785949b-9127-417c-8b55-ab5a4333674e.gif)
 
 - ✉️ You can contact me at [phambuinamphuong@gmail.com](mailto:phambuinamphuong@gmail.com)
-  <a href="https://www.github.com/phuongp2003" target="_blank" rel="noreferrer"><img src="https://img.shields.io/github/followers/phuongp2003?logo=github&style=for-the-badge&color=0891b2&labelColor=1c1917" /></a>
 
 ### Socials
 
