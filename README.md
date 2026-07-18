@@ -34,6 +34,6 @@ Backend: C#, ASP.NET Core, Node.js, TypeScript, Python, FastAPI, Java, Spring Bo
 Frontend: React, Angular, Vue, Nuxt, Tailwind CSS<br>
 Data and delivery: PostgreSQL, Microsoft SQL Server, Redis, Kafka, Docker, GitHub Actions, Nginx
 
-## Activity
+## Extras
 
-<p><img width="49%" src="./assets/stats/contributions.svg" alt="GitHub contribution summary"> <img width="49%" src="https://fynx-profile-views.phambuinamphuong.workers.dev/views/profile.svg" alt="GitHub Profile views"></p>
+<p><a href="https://private-contact.fynx.io.vn/"><img width="49%" src="https://private-contact.fynx.io.vn/card.svg" alt="Send Fynx a private message"></a> <img width="49%" src="https://fynx-profile-views.phambuinamphuong.workers.dev/views/profile.svg" alt="GitHub profile views"></p>
