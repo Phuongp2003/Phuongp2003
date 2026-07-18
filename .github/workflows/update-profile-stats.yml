@@ -1,0 +1,192 @@
+name: Update profile activity and report
+
+on:
+  schedule:
+    - cron: "30 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: profile-activity
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify required secrets
+        env:
+          GH_PROFILE_TOKEN: ${{ secrets.GH_PROFILE_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$GH_PROFILE_TOKEN" ]; then
+            echo "GH_PROFILE_TOKEN is required to include private contributions"
+            exit 1
+          fi
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL is required for the daily report"
+            exit 1
+          fi
+
+      - name: Generate activity SVG
+        id: stats
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_PROFILE_TOKEN }}
+          script: |
+            const fs = require("fs");
+            const startYear = 2024;
+            const currentYear = new Date().getUTCFullYear();
+            const years = Array.from({ length: currentYear - startYear + 1 }, (_, index) => startYear + index);
+            const query = `
+              query ProfileActivity($login: String!, $from: DateTime!, $to: DateTime!) {
+                user(login: $login) {
+                  contributionsCollection(from: $from, to: $to) {
+                    restrictedContributionsCount
+                    contributionCalendar {
+                      totalContributions
+                      weeks {
+                        contributionDays {
+                          contributionCount
+                          date
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+            const collections = await Promise.all(years.map(async (year) => {
+              const data = await github.graphql(query, {
+                login: "Phuongp2003",
+                from: `${year}-01-01T00:00:00Z`,
+                to: year === currentYear ? new Date().toISOString() : `${year}-12-31T23:59:59Z`,
+              });
+              return data.user.contributionsCollection;
+            }));
+
+            const countsByDate = new Map();
+            for (const collection of collections) {
+              for (const day of collection.contributionCalendar.weeks.flatMap((week) => week.contributionDays)) {
+                countsByDate.set(day.date, day.contributionCount);
+              }
+            }
+            const now = new Date();
+            const dateParts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Ho_Chi_Minh",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }).formatToParts(now).map((part) => [part.type, part.value]));
+            const todayKey = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+            const reportTime = `${dateParts.hour}:${dateParts.minute}`;
+            const today = new Date(`${todayKey}T00:00:00Z`);
+            const recentDays = Array.from({ length: 7 }, (_, index) => {
+              const date = new Date(today);
+              date.setUTCDate(today.getUTCDate() - (6 - index));
+              const key = date.toISOString().slice(0, 10);
+              return { count: countsByDate.get(key) || 0 };
+            });
+            const max = Math.max(1, ...recentDays.map((day) => day.count));
+            const bars = recentDays.map((day, index) => {
+              const height = day.count === 0 ? 3 : Math.max(5, Math.round((day.count / max) * 42));
+              const x = 416 + index * 24;
+              const y = 78 - height;
+              const opacity = day.count === 0 ? 0.12 : 0.45 + (index / recentDays.length) * 0.55;
+              return `<rect class="accent" x="${x}" y="${y}" width="14" height="${height}" rx="2" opacity="${opacity.toFixed(2)}" />`;
+            }).join("\n  ");
+            const totalValue = collections.reduce((sum, collection) => sum + collection.contributionCalendar.totalContributions, 0);
+            const lastSevenValue = recentDays.reduce((sum, day) => sum + day.count, 0);
+            const total = new Intl.NumberFormat("en-US").format(totalValue);
+            const todayValue = recentDays.at(-1).count;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="620" height="120" viewBox="0 0 620 120" role="img" aria-label="${total} GitHub contributions since ${startYear}, ${todayValue} today">
+              <style>
+                .surface { fill: #f7f8fa; stroke: #d9dde5; }
+                .label { fill: #586174; font: 600 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 1.2px; }
+                .value { fill: #141821; font: 700 23px ui-sans-serif, system-ui, sans-serif; }
+                .detail { fill: #586174; font: 500 12px ui-sans-serif, system-ui, sans-serif; }
+                .accent { fill: #4777ef; }
+                @media (prefers-color-scheme: dark) {
+                  .surface { fill: #161920; stroke: #303643; }
+                  .label, .detail { fill: #9da7b8; }
+                  .value { fill: #eef1f6; }
+                  .accent { fill: #7da0ff; }
+                }
+              </style>
+              <rect class="surface" x="0.5" y="0.5" width="619" height="119" rx="12" />
+              <rect class="accent" x="28" y="24" width="30" height="3" rx="1.5" />
+              <text class="label" x="28" y="48">GITHUB CONTRIBUTIONS · SINCE ${startYear}</text>
+              <text class="value" x="28" y="79">${total} total</text>
+              <text class="detail" x="28" y="101">${todayValue} today</text>
+              ${bars}
+              <text class="label" x="416" y="101">LAST 7 DAYS</text>
+            </svg>`;
+            fs.mkdirSync("assets/stats", { recursive: true });
+            fs.writeFileSync("assets/stats/contributions.svg", `${svg}\n`);
+            core.setOutput("date", todayKey);
+            core.setOutput("time", reportTime);
+            core.setOutput("today", todayValue);
+            core.setOutput("last_seven", lastSevenValue);
+            core.setOutput("total", totalValue);
+
+      - name: Commit changed activity
+        id: commit
+        run: |
+          if git diff --quiet -- assets/stats/contributions.svg; then
+            echo "No activity changes"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/stats/contributions.svg
+          git commit -m "chore: refresh profile activity"
+          git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Send Discord activity report
+        uses: actions/github-script@v7
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPORT_DATE: ${{ steps.stats.outputs.date }}
+          REPORT_TIME: ${{ steps.stats.outputs.time }}
+          TODAY_CONTRIBUTIONS: ${{ steps.stats.outputs.today }}
+          LAST_SEVEN_CONTRIBUTIONS: ${{ steps.stats.outputs.last_seven }}
+          TOTAL_CONTRIBUTIONS: ${{ steps.stats.outputs.total }}
+          SVG_CHANGED: ${{ steps.commit.outputs.changed }}
+        with:
+          script: |
+            const webhook = process.env.DISCORD_WEBHOOK_URL;
+            if (!webhook) {
+              throw new Error("DISCORD_WEBHOOK_URL is not configured.");
+            }
+            const format = (value) => new Intl.NumberFormat("en-US").format(Number(value) || 0);
+            const payload = {
+              username: "Fynx GitHub report",
+              embeds: [{
+                title: "GitHub contribution report",
+                description: `${process.env.REPORT_DATE} · ${process.env.REPORT_TIME} UTC+7`,
+                color: 0x4777ef,
+                fields: [
+                  { name: "Today", value: `**${format(process.env.TODAY_CONTRIBUTIONS)}**`, inline: true },
+                  { name: "Last 7 days", value: `**${format(process.env.LAST_SEVEN_CONTRIBUTIONS)}**`, inline: true },
+                  { name: "Total since 2024", value: `**${format(process.env.TOTAL_CONTRIBUTIONS)}**`, inline: true },
+                  { name: "SVG", value: process.env.SVG_CHANGED === "true" ? "Updated" : "No change", inline: true },
+                ],
+              }],
+            };
+            const response = await fetch(webhook, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              throw new Error(`Discord webhook failed with HTTP ${response.status}`);
+            }
